@@ -13,20 +13,7 @@ import {
   Modal,
   ActivityIndicator,
 } from 'react-native';
-import {
-  Send,
-  Plus,
-  Settings,
-  MessageSquare,
-  Trash2,
-  Edit3,
-  Check,
-  X,
-  Bot,
-  User,
-  MoreVertical,
-  RefreshCw,
-} from 'lucide-react-native';
+import { Send, Plus, Settings, MessageSquare, Trash2, CreditCard as Edit3, Check, X, Bot, User, MoveVertical as MoreVertical, RefreshCw } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useChat } from '@/features/chat/ChatContext';
 import ConnectionManager from '@/components/ConnectionManager';
