@@ -257,8 +257,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       setCurrentSession(updatedSession);
       setChatSessions(prev => prev.map(s => s.id === updatedSession.id ? updatedSession : s));
       
+      // Create messages array that includes the new user message for API call
+      const messagesToSend = [...currentSession.messages, userMessage];
+      
       // Get response from API
-      const response = await APIManager.sendMessage(text, activeModel!, currentSession.messages);
+      const response = await APIManager.sendMessage(text, activeModel!, messagesToSend);
       
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -347,11 +350,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       setCurrentSession(updatedSession);
       setChatSessions(prev => prev.map(s => s.id === updatedSession.id ? updatedSession : s));
 
+      // Create messages array that includes the new user message for API call
+      const messagesToSend = [...currentSession.messages, userMessage];
+
       // Streaming response
       let responseText = '';
       setStreamingMessage('');
       
-      for await (const token of APIManager.sendMessageStream(text, activeModel!, currentSession.messages)) {
+      for await (const token of APIManager.sendMessageStream(text, activeModel!, messagesToSend)) {
         responseText += token;
         setStreamingMessage(responseText);
       }
