@@ -175,6 +175,7 @@ export class APIManager {
           break;
 
         case 'openai':
+          const openaiModels = await this.getOpenAIModels(config);
           providers.push({
             id: 'openai',
             name: 'OpenAI',
@@ -182,7 +183,7 @@ export class APIManager {
             baseUrl: config.endpoint,
             apiKey: config.apiKey,
             isEnabled: true,
-            models: this.getOpenAIModels(),
+            models: openaiModels,
           });
           break;
 
@@ -294,22 +295,53 @@ export class APIManager {
     }
   }
 
-  private static getContextLength(modelName: string, family?: string): number {
-    // Determine context length based on model name and family
-    const name = modelName.toLowerCase();
+  private static async getOpenAIModels(config: APIConfig): Promise<OllamaModel[]> {
+    // For OpenAI-compatible APIs (like OpenRouter), try to fetch models dynamically
+    const url = `${config.endpoint.replace(/\/$/, '')}/models`;
     
-    if (name.includes('gemma')) return 8192;
-    if (name.includes('deepseek')) return 32768;
-    if (name.includes('qwen')) return 32768;
-    if (name.includes('llama')) return 4096;
-    if (name.includes('mistral')) return 8192;
-    if (name.includes('codellama')) return 16384;
-    
-    // Default context length
-    return 4096;
+    try {
+      const response = await this.makeAPIRequest(url, { method: 'GET' }, config);
+      
+      if (!response.ok) {
+        console.warn('Failed to fetch models from OpenAI-compatible API, using defaults');
+        return this.getDefaultOpenAIModels();
+      }
+
+      const data = await response.json();
+      console.log('OpenAI API models response:', data);
+      
+      if (data.data && Array.isArray(data.data)) {
+        const models = data.data.map((model: any, index: number) => {
+          const modelId = model.id || `model-${index}`;
+          const modelName = model.name || modelId;
+          
+          return {
+            id: `openai-${modelId}`,
+            name: modelId,
+            displayName: modelName,
+            description: model.description || `OpenAI-compatible model: ${modelName}`,
+            isDownloaded: true,
+            isActive: false,
+            provider: 'openai',
+            capabilities: ['chat', 'completion'],
+            contextLength: model.context_length || 4096,
+          };
+        });
+        
+        if (models.length > 0) {
+          return models;
+        }
+      }
+      
+      // Fallback to default models if API doesn't return expected format
+      return this.getDefaultOpenAIModels();
+    } catch (error) {
+      console.warn('Failed to fetch OpenAI models, using defaults:', error);
+      return this.getDefaultOpenAIModels();
+    }
   }
 
-  private static getOpenAIModels(): OllamaModel[] {
+  private static getDefaultOpenAIModels(): OllamaModel[] {
     return [
       {
         id: 'openai-gpt-4o',
@@ -345,6 +377,21 @@ export class APIManager {
         contextLength: 16385,
       },
     ];
+  }
+
+  private static getContextLength(modelName: string, family?: string): number {
+    // Determine context length based on model name and family
+    const name = modelName.toLowerCase();
+    
+    if (name.includes('gemma')) return 8192;
+    if (name.includes('deepseek')) return 32768;
+    if (name.includes('qwen')) return 32768;
+    if (name.includes('llama')) return 4096;
+    if (name.includes('mistral')) return 8192;
+    if (name.includes('codellama')) return 16384;
+    
+    // Default context length
+    return 4096;
   }
 
   private static getAnthropicModels(): OllamaModel[] {
@@ -746,7 +793,7 @@ export class APIManager {
           models = await this.getOllamaModels(config);
           break;
         case 'openai':
-          models = this.getOpenAIModels();
+          models = await this.getOpenAIModels(config);
           // Test the API key with a simple request
           await this.testOpenAIConnection(config);
           break;

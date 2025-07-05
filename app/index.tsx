@@ -13,7 +13,7 @@ import {
   Modal,
   ActivityIndicator,
 } from 'react-native';
-import { Send, Plus, Settings, MessageSquare, Trash2, CreditCard as Edit3, Check, X, Bot, User, MoveVertical as MoreVertical, RefreshCw } from 'lucide-react-native';
+import { Send, Plus, Settings, MessageSquare, Trash2, Edit3, Check, X, Bot, User, MoreVertical, RefreshCw, Menu, ChevronLeft } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useChat } from '@/features/chat/ChatContext';
 import ConnectionManager from '@/components/ConnectionManager';
@@ -39,10 +39,9 @@ export default function ChatScreen() {
 
   const [inputText, setInputText] = useState('');
   const [showConnectionManager, setShowConnectionManager] = useState(false);
-  const [showChatList, setShowChatList] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(false);
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
-  const [showChatOptions, setShowChatOptions] = useState<string | null>(null);
   
   const scrollViewRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
@@ -85,7 +84,7 @@ export default function ChatScreen() {
   const handleCreateNewChat = async () => {
     try {
       await createNewChat();
-      setShowChatList(false);
+      setShowSidebar(false);
     } catch (error) {
       console.error('Failed to create new chat:', error);
       if (error instanceof Error && error.message.includes('No AI models available')) {
@@ -99,14 +98,19 @@ export default function ChatScreen() {
   const handleSwitchChat = async (sessionId: string) => {
     try {
       await switchToChat(sessionId);
-      setShowChatList(false);
+      setShowSidebar(false);
     } catch (error) {
       console.error('Failed to switch chat:', error);
       Alert.alert('Error', 'Failed to switch to chat');
     }
   };
 
-  const handleDeleteChat = async (sessionId: string) => {
+  const handleDeleteChat = async (sessionId: string, event?: any) => {
+    // Prevent event bubbling to avoid triggering chat switch
+    if (event) {
+      event.stopPropagation();
+    }
+
     try {
       Alert.alert(
         'Delete Chat',
@@ -117,8 +121,9 @@ export default function ChatScreen() {
             text: 'Delete',
             style: 'destructive',
             onPress: async () => {
+              console.log('[ChatScreen] Deleting chat:', sessionId);
               await deleteChat(sessionId);
-              setShowChatOptions(null);
+              console.log('[ChatScreen] Chat deleted successfully');
             },
           },
         ]
@@ -129,10 +134,12 @@ export default function ChatScreen() {
     }
   };
 
-  const handleEditChatTitle = (sessionId: string, currentTitle: string) => {
+  const handleEditChatTitle = (sessionId: string, currentTitle: string, event?: any) => {
+    if (event) {
+      event.stopPropagation();
+    }
     setEditingChatId(sessionId);
     setEditingTitle(currentTitle);
-    setShowChatOptions(null);
   };
 
   const handleSaveChatTitle = async () => {
@@ -249,47 +256,63 @@ export default function ChatScreen() {
     );
   };
 
-  const renderChatListModal = () => (
+  const renderSidebar = () => (
     <Modal
-      visible={showChatList}
+      visible={showSidebar}
       transparent
       animationType="slide"
-      onRequestClose={() => setShowChatList(false)}
+      onRequestClose={() => setShowSidebar(false)}
     >
-      <View style={styles.modalOverlay}>
-        <View style={[styles.chatListModal, { backgroundColor: theme.colors.surface }]}>
-          <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}>
-            <Text
-              style={[
-                styles.modalTitle,
-                { color: theme.colors.text, fontFamily: theme.typography.weights.bold },
-              ]}
+      <View style={styles.sidebarOverlay}>
+        <TouchableOpacity 
+          style={styles.sidebarBackdrop} 
+          activeOpacity={1}
+          onPress={() => setShowSidebar(false)}
+        />
+        <View style={[styles.sidebar, { backgroundColor: theme.colors.surface }]}>
+          {/* Sidebar Header */}
+          <View style={[styles.sidebarHeader, { borderBottomColor: theme.colors.border }]}>
+            <View style={styles.sidebarHeaderLeft}>
+              <TouchableOpacity onPress={() => setShowSidebar(false)}>
+                <ChevronLeft color={theme.colors.text} size={24} strokeWidth={2} />
+              </TouchableOpacity>
+              <Text
+                style={[
+                  styles.sidebarTitle,
+                  { color: theme.colors.text, fontFamily: theme.typography.weights.bold },
+                ]}
+              >
+                Chat Sessions
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.sidebarHeaderButton}
+              onPress={() => setShowConnectionManager(true)}
             >
-              Chat Sessions
-            </Text>
-            <TouchableOpacity onPress={() => setShowChatList(false)}>
-              <X color={theme.colors.text} size={24} strokeWidth={2} />
+              <Settings color={theme.colors.text} size={20} strokeWidth={2} />
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.chatList} showsVerticalScrollIndicator={false}>
-            <TouchableOpacity
-              style={[styles.newChatButton, { backgroundColor: theme.colors.primary }]}
-              onPress={handleCreateNewChat}
+          {/* New Chat Button */}
+          <TouchableOpacity
+            style={[styles.newChatButton, { backgroundColor: theme.colors.primary }]}
+            onPress={handleCreateNewChat}
+          >
+            <Plus color={theme.colors.userText} size={20} strokeWidth={2} />
+            <Text
+              style={[
+                styles.newChatText,
+                { color: theme.colors.userText, fontFamily: theme.typography.weights.semibold },
+              ]}
             >
-              <Plus color={theme.colors.userText} size={20} strokeWidth={2} />
-              <Text
-                style={[
-                  styles.newChatText,
-                  { color: theme.colors.userText, fontFamily: theme.typography.weights.semibold },
-                ]}
-              >
-                New Chat
-              </Text>
-            </TouchableOpacity>
+              New Chat
+            </Text>
+          </TouchableOpacity>
 
+          {/* Chat List */}
+          <ScrollView style={styles.chatList} showsVerticalScrollIndicator={false}>
             {chatSessions.map((session) => (
-              <View key={session.id} style={styles.chatItemContainer}>
+              <View key={session.id} style={styles.chatItemWrapper}>
                 <TouchableOpacity
                   style={[
                     styles.chatItem,
@@ -297,119 +320,141 @@ export default function ChatScreen() {
                   ]}
                   onPress={() => handleSwitchChat(session.id)}
                 >
-                  <View style={styles.chatItemContent}>
+                  <View style={styles.chatItemIcon}>
                     <MessageSquare
                       color={session.isActive ? theme.colors.primary : theme.colors.textMuted}
-                      size={20}
+                      size={18}
                       strokeWidth={2}
                     />
-                    <View style={styles.chatItemText}>
-                      {editingChatId === session.id ? (
-                        <View style={styles.editTitleContainer}>
-                          <TextInput
-                            style={[
-                              styles.editTitleInput,
-                              {
-                                color: theme.colors.text,
-                                borderColor: theme.colors.border,
-                                backgroundColor: theme.colors.inputBackground,
-                                fontFamily: theme.typography.weights.regular,
-                              },
-                            ]}
-                            value={editingTitle}
-                            onChangeText={setEditingTitle}
-                            onSubmitEditing={handleSaveChatTitle}
-                            autoFocus
-                          />
-                          <View style={styles.editTitleActions}>
-                            <TouchableOpacity onPress={handleSaveChatTitle}>
-                              <Check color={theme.colors.success} size={16} strokeWidth={2} />
-                            </TouchableOpacity>
-                            <TouchableOpacity onPress={handleCancelEditTitle}>
-                              <X color={theme.colors.error} size={16} strokeWidth={2} />
-                            </TouchableOpacity>
-                          </View>
-                        </View>
-                      ) : (
-                        <>
-                          <Text
-                            style={[
-                              styles.chatTitle,
-                              {
-                                color: session.isActive ? theme.colors.primary : theme.colors.text,
-                                fontFamily: theme.typography.weights.semibold,
-                              },
-                            ]}
-                            numberOfLines={1}
-                          >
-                            {session.title}
-                          </Text>
-                          <Text
-                            style={[
-                              styles.chatSubtitle,
-                              {
-                                color: theme.colors.textMuted,
-                                fontFamily: theme.typography.weights.regular,
-                              },
-                            ]}
-                          >
-                            {session.messages.length} messages • {session.model}
-                          </Text>
-                        </>
-                      )}
-                    </View>
                   </View>
-                </TouchableOpacity>
+                  
+                  <View style={styles.chatItemContent}>
+                    {editingChatId === session.id ? (
+                      <View style={styles.editTitleContainer}>
+                        <TextInput
+                          style={[
+                            styles.editTitleInput,
+                            {
+                              color: theme.colors.text,
+                              borderColor: theme.colors.border,
+                              backgroundColor: theme.colors.inputBackground,
+                              fontFamily: theme.typography.weights.regular,
+                            },
+                          ]}
+                          value={editingTitle}
+                          onChangeText={setEditingTitle}
+                          onSubmitEditing={handleSaveChatTitle}
+                          autoFocus
+                        />
+                        <View style={styles.editTitleActions}>
+                          <TouchableOpacity onPress={handleSaveChatTitle}>
+                            <Check color={theme.colors.success} size={16} strokeWidth={2} />
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={handleCancelEditTitle}>
+                            <X color={theme.colors.error} size={16} strokeWidth={2} />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ) : (
+                      <>
+                        <Text
+                          style={[
+                            styles.chatTitle,
+                            {
+                              color: session.isActive ? theme.colors.primary : theme.colors.text,
+                              fontFamily: theme.typography.weights.semibold,
+                            },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {session.title}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.chatSubtitle,
+                            {
+                              color: theme.colors.textMuted,
+                              fontFamily: theme.typography.weights.regular,
+                            },
+                          ]}
+                        >
+                          {session.messages.length} messages • {session.model}
+                        </Text>
+                      </>
+                    )}
+                  </View>
 
-                <TouchableOpacity
-                  style={styles.chatOptionsButton}
-                  onPress={() =>
-                    setShowChatOptions(showChatOptions === session.id ? null : session.id)
-                  }
-                >
-                  <MoreVertical color={theme.colors.textMuted} size={16} strokeWidth={2} />
-                </TouchableOpacity>
-
-                {showChatOptions === session.id && (
-                  <View
-                    style={[
-                      styles.chatOptionsMenu,
-                      { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
-                    ]}
-                  >
+                  <View style={styles.chatItemActions}>
                     <TouchableOpacity
-                      style={styles.chatOptionItem}
-                      onPress={() => handleEditChatTitle(session.id, session.title)}
+                      style={styles.chatActionButton}
+                      onPress={(e) => handleEditChatTitle(session.id, session.title, e)}
                     >
-                      <Edit3 color={theme.colors.text} size={16} strokeWidth={2} />
-                      <Text
-                        style={[
-                          styles.chatOptionText,
-                          { color: theme.colors.text, fontFamily: theme.typography.weights.regular },
-                        ]}
-                      >
-                        Rename
-                      </Text>
+                      <Edit3 color={theme.colors.textMuted} size={16} strokeWidth={2} />
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={styles.chatOptionItem}
-                      onPress={() => handleDeleteChat(session.id)}
+                      style={styles.chatActionButton}
+                      onPress={(e) => handleDeleteChat(session.id, e)}
                     >
                       <Trash2 color={theme.colors.error} size={16} strokeWidth={2} />
-                      <Text
-                        style={[
-                          styles.chatOptionText,
-                          { color: theme.colors.error, fontFamily: theme.typography.weights.regular },
-                        ]}
-                      >
-                        Delete
-                      </Text>
                     </TouchableOpacity>
                   </View>
-                )}
+                </TouchableOpacity>
               </View>
             ))}
+
+            {chatSessions.length === 0 && (
+              <View style={styles.emptyChatList}>
+                <Text
+                  style={[
+                    styles.emptyChatText,
+                    { color: theme.colors.textMuted, fontFamily: theme.typography.weights.regular },
+                  ]}
+                >
+                  No chat sessions yet
+                </Text>
+                <Text
+                  style={[
+                    styles.emptyChatSubtext,
+                    { color: theme.colors.textMuted, fontFamily: theme.typography.weights.regular },
+                  ]}
+                >
+                  Create your first chat to get started
+                </Text>
+              </View>
+            )}
           </ScrollView>
+
+          {/* Connection Status */}
+          <View style={[styles.connectionStatus, { borderTopColor: theme.colors.border }]}>
+            <View style={styles.connectionStatusContent}>
+              <View style={styles.connectionStatusIndicator}>
+                <View
+                  style={[
+                    styles.statusDot,
+                    { backgroundColor: isConnected ? theme.colors.success : theme.colors.error },
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.connectionStatusText,
+                    { color: theme.colors.text, fontFamily: theme.typography.weights.medium },
+                  ]}
+                >
+                  {isConnected ? 'Connected' : 'Disconnected'}
+                </Text>
+              </View>
+              {activeModel && (
+                <Text
+                  style={[
+                    styles.activeModelText,
+                    { color: theme.colors.textMuted, fontFamily: theme.typography.weights.regular },
+                  ]}
+                >
+                  {activeModel.displayName}
+                </Text>
+              )}
+            </View>
+          </View>
         </View>
       </View>
     </Modal>
@@ -585,29 +630,44 @@ export default function ChatScreen() {
     sendButtonDisabled: {
       backgroundColor: theme.colors.border,
     },
-    modalOverlay: {
+    // Sidebar Styles
+    sidebarOverlay: {
+      flex: 1,
+      flexDirection: 'row',
+    },
+    sidebarBackdrop: {
       flex: 1,
       backgroundColor: 'rgba(0, 0, 0, 0.5)',
-      justifyContent: 'flex-end',
     },
-    chatListModal: {
-      height: '80%',
-      borderTopLeftRadius: theme.borderRadius.xl,
-      borderTopRightRadius: theme.borderRadius.xl,
-      overflow: 'hidden',
+    sidebar: {
+      width: 320,
+      height: '100%',
+      borderTopRightRadius: 0,
+      borderBottomRightRadius: 0,
+      shadowColor: '#000',
+      shadowOffset: { width: 2, height: 0 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 5,
     },
-    modalHeader: {
+    sidebarHeader: {
       flexDirection: 'row',
-      justifyContent: 'space-between',
       alignItems: 'center',
+      justifyContent: 'space-between',
       padding: theme.spacing.lg,
       borderBottomWidth: 1,
     },
-    modalTitle: {
-      fontSize: theme.typography.sizes.lg,
-    },
-    chatList: {
+    sidebarHeaderLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
       flex: 1,
+    },
+    sidebarTitle: {
+      fontSize: theme.typography.sizes.lg,
+      marginLeft: theme.spacing.sm,
+    },
+    sidebarHeaderButton: {
+      padding: theme.spacing.sm,
     },
     newChatButton: {
       flexDirection: 'row',
@@ -621,21 +681,25 @@ export default function ChatScreen() {
     newChatText: {
       fontSize: theme.typography.sizes.md,
     },
-    chatItemContainer: {
-      position: 'relative',
+    chatList: {
+      flex: 1,
     },
-    chatItem: {
-      paddingHorizontal: theme.spacing.lg,
-      paddingVertical: theme.spacing.md,
+    chatItemWrapper: {
       borderBottomWidth: 1,
       borderBottomColor: theme.colors.borderLight,
     },
-    chatItemContent: {
+    chatItem: {
       flexDirection: 'row',
       alignItems: 'center',
+      paddingHorizontal: theme.spacing.lg,
+      paddingVertical: theme.spacing.md,
       gap: theme.spacing.sm,
     },
-    chatItemText: {
+    chatItemIcon: {
+      width: 24,
+      alignItems: 'center',
+    },
+    chatItemContent: {
       flex: 1,
     },
     chatTitle: {
@@ -645,36 +709,12 @@ export default function ChatScreen() {
     chatSubtitle: {
       fontSize: theme.typography.sizes.sm,
     },
-    chatOptionsButton: {
-      position: 'absolute',
-      right: theme.spacing.lg,
-      top: '50%',
-      transform: [{ translateY: -12 }],
-      padding: theme.spacing.sm,
-    },
-    chatOptionsMenu: {
-      position: 'absolute',
-      right: theme.spacing.lg,
-      top: '100%',
-      backgroundColor: theme.colors.surface,
-      borderWidth: 1,
-      borderRadius: theme.borderRadius.md,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 4,
-      elevation: 3,
-      zIndex: 1000,
-    },
-    chatOptionItem: {
+    chatItemActions: {
       flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: theme.spacing.md,
-      paddingVertical: theme.spacing.sm,
-      gap: theme.spacing.sm,
+      gap: theme.spacing.xs,
     },
-    chatOptionText: {
-      fontSize: theme.typography.sizes.sm,
+    chatActionButton: {
+      padding: theme.spacing.xs,
     },
     editTitleContainer: {
       flexDirection: 'row',
@@ -693,7 +733,43 @@ export default function ChatScreen() {
       flexDirection: 'row',
       gap: theme.spacing.sm,
     },
+    emptyChatList: {
+      padding: theme.spacing.xl,
+      alignItems: 'center',
+    },
+    emptyChatText: {
+      fontSize: theme.typography.sizes.md,
+      marginBottom: theme.spacing.xs,
+    },
+    emptyChatSubtext: {
+      fontSize: theme.typography.sizes.sm,
+      textAlign: 'center',
+    },
     connectionStatus: {
+      borderTopWidth: 1,
+      padding: theme.spacing.lg,
+    },
+    connectionStatusContent: {
+      gap: theme.spacing.xs,
+    },
+    connectionStatusIndicator: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.sm,
+    },
+    statusDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+    },
+    connectionStatusText: {
+      fontSize: theme.typography.sizes.sm,
+    },
+    activeModelText: {
+      fontSize: theme.typography.sizes.xs,
+      marginLeft: 20,
+    },
+    connectionStatusBanner: {
       backgroundColor: theme.colors.error + '20',
       paddingHorizontal: theme.spacing.md,
       paddingVertical: theme.spacing.sm,
@@ -703,7 +779,7 @@ export default function ChatScreen() {
       alignItems: 'center',
       gap: theme.spacing.sm,
     },
-    connectionStatusText: {
+    connectionStatusBannerText: {
       color: theme.colors.error,
       fontSize: theme.typography.sizes.sm,
       fontFamily: theme.typography.weights.medium,
@@ -726,8 +802,8 @@ export default function ChatScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.headerLeft} onPress={() => setShowChatList(true)}>
-          <MessageSquare color={theme.colors.primary} size={24} strokeWidth={2} />
+        <TouchableOpacity style={styles.headerLeft} onPress={() => setShowSidebar(true)}>
+          <Menu color={theme.colors.primary} size={24} strokeWidth={2} />
           <View>
             <Text style={styles.headerTitle}>
               {currentSession?.title || 'New Chat'}
@@ -753,12 +829,11 @@ export default function ChatScreen() {
         </View>
       </View>
 
-      {/* Connection Status */}
+      {/* Connection Status Banner */}
       {!isConnected && connectionError && (
-        <View style={styles.connectionStatus}>
-          <Text style={styles.connectionStatus}>⚠️</Text>
-          <Text style={styles.connectionStatusText}>
-            Not connected to AI service. Tap settings to configure.
+        <View style={styles.connectionStatusBanner}>
+          <Text style={styles.connectionStatusBannerText}>
+            ⚠️ Not connected to AI service. Tap settings to configure.
           </Text>
           <TouchableOpacity
             style={styles.retryButton}
@@ -846,8 +921,8 @@ export default function ChatScreen() {
         </View>
       </KeyboardAvoidingView>
 
-      {/* Chat List Modal */}
-      {renderChatListModal()}
+      {/* Sidebar */}
+      {renderSidebar()}
 
       {/* Connection Manager */}
       <ConnectionManager
