@@ -34,68 +34,78 @@ export class StorageManager {
 
   // Chat Sessions Management
   static async saveChatSession(session: ChatSession): Promise<void> {
-    const sessions = await this.getChatSessions();
-    const existingIndex = sessions.findIndex(s => s.id === session.id);
-    
-    if (existingIndex >= 0) {
-      sessions[existingIndex] = session;
-    } else {
-      sessions.unshift(session); // Add to beginning
+    try {
+      const sessions = await this.getChatSessions();
+      const existingIndex = sessions.findIndex(s => s.id === session.id);
+      
+      if (existingIndex >= 0) {
+        sessions[existingIndex] = session;
+      } else {
+        sessions.unshift(session); // Add to beginning
+      }
+      
+      await this.setItem('chat_sessions', JSON.stringify(sessions));
+      console.log(`[StorageManager] Saved session ${session.id} with isActive: ${session.isActive}`);
+    } catch (error) {
+      console.error('[StorageManager] Failed to save chat session:', error);
+      throw error;
     }
-    
-    await this.setItem('chat_sessions', JSON.stringify(sessions));
   }
 
   static async getChatSessions(): Promise<ChatSession[]> {
-    const sessionsData = await this.getItem('chat_sessions');
-    if (!sessionsData) {
-      console.log('[StorageManager.getChatSessions] No sessions found');
-      return [];
-    }
     try {
+      const sessionsData = await this.getItem('chat_sessions');
+      if (!sessionsData) {
+        console.log('[StorageManager] No sessions found in storage');
+        return [];
+      }
+      
       const sessions = JSON.parse(sessionsData);
-      console.log('[StorageManager.getChatSessions] Loaded sessions:', sessions.map((s: any) => s.id));
-      return sessions.map((session: any) => ({
+      const normalizedSessions = sessions.map((session: any) => ({
         ...session,
         createdAt: new Date(session.createdAt),
         updatedAt: new Date(session.updatedAt),
+        isActive: session.isActive ?? false, // Ensure isActive is always boolean
         messages: session.messages.map((msg: any) => ({
           ...msg,
           timestamp: new Date(msg.timestamp)
         }))
       }));
-    } catch (e) {
-      console.error('[StorageManager.getChatSessions] Failed to parse sessions:', e);
+      
+      console.log(`[StorageManager] Loaded ${normalizedSessions.length} sessions`);
+      return normalizedSessions;
+    } catch (error) {
+      console.error('[StorageManager] Failed to parse sessions:', error);
       return [];
     }
   }
 
   static async deleteChatSession(sessionId: string): Promise<void> {
     try {
-      console.log('[StorageManager.deleteChatSession] Deleting session with ID:', sessionId);
+      console.log(`[StorageManager] Deleting session: ${sessionId}`);
       const sessions = await this.getChatSessions();
-      console.log('[StorageManager.deleteChatSession] Sessions before delete:', sessions.map(s => s.id));
       const filteredSessions = sessions.filter(s => s.id !== sessionId);
-      console.log('[StorageManager.deleteChatSession] Sessions after delete:', filteredSessions.map(s => s.id));
+      
+      console.log(`[StorageManager] Sessions before delete: ${sessions.length}, after: ${filteredSessions.length}`);
       await this.setItem('chat_sessions', JSON.stringify(filteredSessions));
-      console.log('[StorageManager.deleteChatSession] Session deleted successfully');
+      console.log(`[StorageManager] Successfully deleted session ${sessionId}`);
     } catch (error) {
-      console.error('[StorageManager.deleteChatSession] Failed to delete session:', error);
+      console.error(`[StorageManager] Failed to delete session ${sessionId}:`, error);
       throw error;
     }
   }
 
   static async deleteMultipleChatSessions(sessionIds: string[]): Promise<void> {
     try {
-      console.log('StorageManager: Deleting multiple sessions:', sessionIds);
+      console.log('[StorageManager] Deleting multiple sessions:', sessionIds);
       
       const sessions = await this.getChatSessions();
       const filteredSessions = sessions.filter(s => !sessionIds.includes(s.id));
       
       await this.setItem('chat_sessions', JSON.stringify(filteredSessions));
-      console.log('StorageManager: Multiple sessions deleted successfully');
+      console.log('[StorageManager] Multiple sessions deleted successfully');
     } catch (error) {
-      console.error('StorageManager: Failed to delete multiple sessions:', error);
+      console.error('[StorageManager] Failed to delete multiple sessions:', error);
       throw error;
     }
   }

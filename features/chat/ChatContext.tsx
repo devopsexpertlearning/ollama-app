@@ -44,16 +44,29 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         setConnectionError(error instanceof Error ? error.message : 'Connection failed');
       }
     } catch (error) {
-      // Only fail if we can't load local data
+      console.error('Failed to initialize data:', error);
     }
   };
 
   const loadChatSessions = async () => {
-    const sessions = await StorageManager.getChatSessions();
-    const normalizedSessions = sessions.map(s => ({ ...s, isActive: s.isActive ?? false }));
-    setChatSessions(normalizedSessions);
-    const activeSession = normalizedSessions.find(s => s.isActive) || normalizedSessions[0];
-    if (activeSession) setCurrentSession(activeSession);
+    try {
+      const sessions = await StorageManager.getChatSessions();
+      const normalizedSessions = sessions.map(s => ({ ...s, isActive: s.isActive ?? false }));
+      setChatSessions(normalizedSessions);
+      
+      // Find the active session or default to the first one
+      const activeSession = normalizedSessions.find(s => s.isActive);
+      if (activeSession) {
+        setCurrentSession(activeSession);
+      } else if (normalizedSessions.length > 0) {
+        // If no active session but sessions exist, make the first one active
+        const firstSession = { ...normalizedSessions[0], isActive: true };
+        setCurrentSession(firstSession);
+        await StorageManager.saveChatSession(firstSession);
+      }
+    } catch (error) {
+      console.error('Failed to load chat sessions:', error);
+    }
   };
 
   const loadProviders = async () => {
@@ -66,21 +79,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setActiveModelState(model);
   };
 
-  const switchToChat = async (sessionId: string) => {
-    // Always reload sessions from storage to ensure state is in sync
-    await StorageManager.getChatSessions().then((sessions) => {
-      const normalizedSessions = sessions.map(s => ({
-        ...s,
-        isActive: s.id === sessionId,
-      }));
-      setChatSessions(normalizedSessions);
-      const session = normalizedSessions.find(s => s.id === sessionId);
-      if (session) setCurrentSession({ ...session, isActive: true });
-      // Save updated isActive state to storage
-      Promise.all(normalizedSessions.map(s => StorageManager.saveChatSession(s)));
-    });
-  };
-
   const createNewChat = async () => {
     if (!activeModel) {
       if (providers.length > 0 && providers[0].models.length > 0) {
@@ -89,6 +87,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         throw new Error('No AI models available. Please configure your AI connection first.');
       }
     }
+
     const newSession: ChatSession = {
       id: Date.now().toString(),
       title: 'New Chat',
@@ -101,29 +100,84 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       tags: [],
     };
 
-    // Remove all old sessions from storage before creating a new one
-    await StorageManager.removeItem('chat_sessions');
-    const updatedSessions = [newSession];
+    // Deactivate all existing sessions
+    const updatedSessions = chatSessions.map(s => ({ ...s, isActive: false }));
+    
+    // Add new session at the beginning
+    updatedSessions.unshift(newSession);
+    
     setChatSessions(updatedSessions);
     setCurrentSession(newSession);
-    await StorageManager.saveChatSession(newSession);
+    
+    // Save all sessions to update their active status
+    await Promise.all([
+      StorageManager.saveChatSession(newSession),
+      ...chatSessions.map(s => StorageManager.saveChatSession({ ...s, isActive: false }))
+    ]);
+  };
+
+  const switchToChat = async (sessionId: string) => {
+    try {
+      // Find the session to switch to
+      const targetSession = chatSessions.find(s => s.id === sessionId);
+      if (!targetSession) {
+        console.error('Session not found:', sessionId);
+        return;
+      }
+
+      // Update all sessions: deactivate current, activate target
+      const updatedSessions = chatSessions.map(s => ({
+        ...s,
+        isActive: s.id === sessionId,
+      }));
+
+      setChatSessions(updatedSessions);
+      setCurrentSession({ ...targetSession, isActive: true });
+
+      // Save the updated active states to storage
+      await Promise.all(updatedSessions.map(s => StorageManager.saveChatSession(s)));
+    } catch (error) {
+      console.error('Failed to switch chat:', error);
+      throw error;
+    }
   };
 
   const deleteChat = async (sessionId: string) => {
     try {
-      console.log('[deleteChat] Attempting to delete chat with ID:', sessionId);
-      console.log('[deleteChat] Current chatSessions:', chatSessions.map(s => s.id));
-      console.log('[deleteChat] CurrentSession:', currentSession?.id);
-
+      console.log('[ChatContext] Deleting chat with ID:', sessionId);
+      
+      // Delete from storage
       await StorageManager.deleteChatSession(sessionId);
+      
+      // Update local state
+      const updatedSessions = chatSessions.filter(s => s.id !== sessionId);
+      setChatSessions(updatedSessions);
 
-      // Instead of filtering chatSessions, reload from storage to ensure sync
-      await loadChatSessions();
+      // Handle current session logic
+      if (currentSession?.id === sessionId) {
+        if (updatedSessions.length > 0) {
+          // Switch to the first available session
+          const newActiveSession = { ...updatedSessions[0], isActive: true };
+          setCurrentSession(newActiveSession);
+          
+          // Update all sessions to reflect new active state
+          const sessionsWithActiveState = updatedSessions.map(s => ({
+            ...s,
+            isActive: s.id === newActiveSession.id,
+          }));
+          setChatSessions(sessionsWithActiveState);
+          
+          // Save updated active states
+          await Promise.all(sessionsWithActiveState.map(s => StorageManager.saveChatSession(s)));
+        } else {
+          setCurrentSession(null);
+        }
+      }
 
       await refreshStats();
-      console.log('[deleteChat] Finished deleteChat');
+      console.log('[ChatContext] Chat deleted successfully');
     } catch (error) {
-      console.error('[deleteChat] Error:', error);
+      console.error('[ChatContext] Failed to delete chat:', error);
       throw error;
     }
   };
@@ -133,6 +187,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       await StorageManager.deleteMultipleChatSessions(sessionIds);
       const updatedSessions = chatSessions.filter(s => !sessionIds.includes(s.id));
       setChatSessions(updatedSessions);
+      
       if (currentSession && sessionIds.includes(currentSession.id)) {
         if (updatedSessions.length > 0) {
           await switchToChat(updatedSessions[0].id);
@@ -140,26 +195,49 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           setCurrentSession(null);
         }
       }
+      
       await refreshStats();
     } catch (error) {
+      console.error('Failed to delete multiple chats:', error);
       throw error;
     }
   };
 
   const updateChatTitle = async (sessionId: string, title: string) => {
-    const updatedSessions = chatSessions.map(s => s.id === sessionId ? { ...s, title, updatedAt: new Date() } : s);
-    setChatSessions(updatedSessions);
-    if (currentSession?.id === sessionId) setCurrentSession({ ...currentSession, title });
-    const session = updatedSessions.find(s => s.id === sessionId);
-    if (session) await StorageManager.saveChatSession(session);
+    try {
+      const updatedSessions = chatSessions.map(s => 
+        s.id === sessionId ? { ...s, title, updatedAt: new Date() } : s
+      );
+      setChatSessions(updatedSessions);
+      
+      if (currentSession?.id === sessionId) {
+        setCurrentSession({ ...currentSession, title });
+      }
+      
+      const session = updatedSessions.find(s => s.id === sessionId);
+      if (session) {
+        await StorageManager.saveChatSession(session);
+      }
+    } catch (error) {
+      console.error('Failed to update chat title:', error);
+      throw error;
+    }
   };
 
   const sendMessage = async (text: string) => {
-    if (!activeModel || !isConnected) throw new Error('No AI connection available. Please configure your AI connection first.');
+    if (!activeModel || !isConnected) {
+      throw new Error('No AI connection available. Please configure your AI connection first.');
+    }
     if (isLoading) return;
-    if (!currentSession) await createNewChat();
+
+    // Create new chat if none exists
+    if (!currentSession) {
+      await createNewChat();
+    }
     if (!currentSession) return;
+    
     setIsLoading(true);
+    
     try {
       const userMessage: Message = {
         id: Date.now().toString(),
@@ -168,15 +246,20 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         timestamp: new Date(),
         model: activeModel!.name,
       };
+      
       const updatedSession = {
         ...currentSession,
         messages: [...currentSession.messages, userMessage],
         updatedAt: new Date(),
         title: currentSession.messages.length === 0 ? generateChatTitle(text) : currentSession.title,
       };
+      
       setCurrentSession(updatedSession);
       setChatSessions(prev => prev.map(s => s.id === updatedSession.id ? updatedSession : s));
+      
+      // Get response from API
       const response = await APIManager.sendMessage(text, activeModel!, currentSession.messages);
+      
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         text: response,
@@ -184,18 +267,27 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         timestamp: new Date(),
         model: activeModel!.name,
       };
+      
       const finalSession = {
         ...updatedSession,
         messages: [...updatedSession.messages, assistantMessage],
         updatedAt: new Date(),
       };
+      
       setCurrentSession(finalSession);
       setChatSessions(prev => prev.map(s => s.id === finalSession.id ? finalSession : s));
+      
       await StorageManager.saveChatSession(finalSession);
       await refreshStats();
+      
     } catch (error) {
+      console.error('Failed to send message:', error);
+      
       let errorText = 'Failed to send message';
-      if (error instanceof Error) errorText = error.message;
+      if (error instanceof Error) {
+        errorText = error.message;
+      }
+      
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         text: String(errorText),
@@ -204,12 +296,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         model: activeModel?.name || 'unknown',
         error: true,
       };
+      
       if (currentSession) {
         const errorSession = {
           ...currentSession,
           messages: [...currentSession.messages, errorMessage],
           updatedAt: new Date(),
         };
+        
         setCurrentSession(errorSession);
         setChatSessions(prev => prev.map(s => s.id === errorSession.id ? errorSession : s));
         await StorageManager.saveChatSession(errorSession);
@@ -220,12 +314,20 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   };
 
   const sendMessageStream = async (text: string) => {
-    if (!activeModel || !isConnected) throw new Error('No AI connection available. Please configure your AI connection first.');
+    if (!activeModel || !isConnected) {
+      throw new Error('No AI connection available. Please configure your AI connection first.');
+    }
     if (isLoading) return;
-    if (!currentSession) await createNewChat();
+
+    // Create new chat if none exists
+    if (!currentSession) {
+      await createNewChat();
+    }
     if (!currentSession) return;
+    
     setIsLoading(true);
     setStreamingMessage('');
+    
     try {
       const userMessage: Message = {
         id: Date.now().toString(),
@@ -234,37 +336,34 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         timestamp: new Date(),
         model: activeModel!.name,
       };
+      
       const updatedSession = {
         ...currentSession,
         messages: [...currentSession.messages, userMessage],
         updatedAt: new Date(),
         title: currentSession.messages.length === 0 ? generateChatTitle(text) : currentSession.title,
       };
+      
       setCurrentSession(updatedSession);
       setChatSessions(prev => prev.map(s => s.id === updatedSession.id ? updatedSession : s));
 
       // Streaming response
       let responseText = '';
-      let assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: '',
-        sender: 'assistant',
-        timestamp: new Date(),
-        model: activeModel!.name,
-        isStreaming: true,
-      };
       setStreamingMessage('');
+      
       for await (const token of APIManager.sendMessageStream(text, activeModel!, currentSession.messages)) {
         responseText += token;
         setStreamingMessage(responseText);
       }
+      
       setStreamingMessage(null);
 
-      assistantMessage = {
-        ...assistantMessage,
+      const assistantMessage: Message = {
+        id: (Date.now() + 1).toString(),
         text: responseText,
-        isStreaming: false,
+        sender: 'assistant',
         timestamp: new Date(),
+        model: activeModel!.name,
       };
 
       const finalSession = {
@@ -272,14 +371,22 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         messages: [...updatedSession.messages, assistantMessage],
         updatedAt: new Date(),
       };
+      
       setCurrentSession(finalSession);
       setChatSessions(prev => prev.map(s => s.id === finalSession.id ? finalSession : s));
+      
       await StorageManager.saveChatSession(finalSession);
       await refreshStats();
+      
     } catch (error) {
       setStreamingMessage(null);
+      console.error('Failed to send streaming message:', error);
+      
       let errorText = 'Failed to send message';
-      if (error instanceof Error) errorText = error.message;
+      if (error instanceof Error) {
+        errorText = error.message;
+      }
+      
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         text: String(errorText),
@@ -288,12 +395,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         model: activeModel?.name || 'unknown',
         error: true,
       };
+      
       if (currentSession) {
         const errorSession = {
           ...currentSession,
           messages: [...currentSession.messages, errorMessage],
           updatedAt: new Date(),
         };
+        
         setCurrentSession(errorSession);
         setChatSessions(prev => prev.map(s => s.id === errorSession.id ? errorSession : s));
         await StorageManager.saveChatSession(errorSession);
@@ -306,22 +415,31 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   const regenerateResponse = async (messageId: string) => {
     if (!currentSession || !activeModel || !isConnected) return;
+    
     const messageIndex = currentSession.messages.findIndex(m => m.id === messageId);
     if (messageIndex === -1 || messageIndex === 0) return;
+    
     const previousUserMessage = currentSession.messages[messageIndex - 1];
     if (previousUserMessage.sender !== 'user') return;
+    
+    // Remove the message to regenerate and all messages after it
     const updatedMessages = currentSession.messages.slice(0, messageIndex);
     const updatedSession = {
       ...currentSession,
       messages: updatedMessages,
     };
+    
     setCurrentSession(updatedSession);
+    
+    // Regenerate response
     await sendMessage(previousUserMessage.text);
   };
 
   const setActiveModel = async (model: OllamaModel) => {
     setActiveModelState(model);
     await StorageManager.setActiveModel(model);
+    
+    // Update providers to reflect active state
     setProviders(prev => prev.map(provider => ({
       ...provider,
       models: provider.models.map(m => ({
@@ -337,10 +455,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       setProviders(providersData);
       setIsConnected(true);
       setConnectionError(null);
+      
+      // If no active model and we have models, set the first one as active
       if (!activeModel && providersData.length > 0 && providersData[0].models.length > 0) {
         await setActiveModel(providersData[0].models[0]);
       }
     } catch (error) {
+      console.error('Failed to refresh providers:', error);
       setIsConnected(false);
       setConnectionError(error instanceof Error ? error.message : 'Connection failed');
       throw error;
@@ -351,7 +472,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     try {
       const newStats = await StorageManager.getChatStats();
       setStats(newStats);
-    } catch (error) {}
+    } catch (error) {
+      console.error('Failed to refresh stats:', error);
+    }
   };
 
   const generateChatTitle = (firstMessage: string): string => {
@@ -389,8 +512,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       deleteMultipleChats,
       updateChatTitle,
       sendMessage,
-      sendMessageStream, // <-- add streaming version
-      streamingMessage,   // <-- expose streaming message
+      sendMessageStream,
+      streamingMessage,
       regenerateResponse,
       isLoading,
       providers,
@@ -401,8 +524,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       refreshStats,
       isConnected,
       connectionError,
-      clearAllDataAndReload, // <-- add this to context if you want to call from UI
-      handleClearRecentChats, // <-- add clear recent chats handler
+      clearAllDataAndReload,
+      handleClearRecentChats,
     }}>
       {children}
     </ChatContext.Provider>
@@ -416,5 +539,3 @@ export function useChat() {
   }
   return context;
 }
-
-
